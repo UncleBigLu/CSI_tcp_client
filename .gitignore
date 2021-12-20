@@ -1,0 +1,6 @@
+.idea
+.vscode
+.devcontainer
+build
+cmake-build-debug
+
