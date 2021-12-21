@@ -278,5 +278,5 @@ void app_main(void)
     //ESP_ERROR_CHECK(example_connect());
     wifi_init_sta();
     csi_init();
-    //xTaskCreate(tcp_client_task, "tcp_client", 4096, NULL, 5, NULL);
+    xTaskCreate(tcp_client_task, "tcp_client", 4096, NULL, 5, NULL);
 }
