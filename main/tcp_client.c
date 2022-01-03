@@ -124,18 +124,29 @@ static void _get_subcarrier_csi(const int8_t* csi_data, uint16_t subcarrier_inde
  * wifi_csi_info_t:
  *
  * */
+static QueueHandle_t csi_queue;
 
-static void serial_print_csi(wifi_csi_info_t* data) {
-    // Get average csi of all subcarrier
-    uint16_t csi_length = data->len;
-    uint16_t start_subcarrier = data->first_word_invalid ? 2 : 0;
-    float csi_avg = 0;
-    int8_t img, real;
-    for(uint16_t i = start_subcarrier; i < csi_length; ++i) {
-        _get_subcarrier_csi(data->buf, i, &img, &real);
-        csi_avg += (sqrtf(pow(img, 2) + pow(real, 2))) / csi_length;
+static void serial_print_csi_task() {
+    // Get CSI from queue
+    while(1)
+    {
+        wifi_csi_info_t* data = NULL;
+        xQueueReceive(csi_queue, &data, portMAX_DELAY);
+        // Get average csi of all subcarrier
+        uint16_t csi_length = data->len;
+        uint16_t start_subcarrier = data->first_word_invalid ? 2 : 0;
+        float csi_avg = 0;
+        int8_t img, real;
+        for(uint16_t i = start_subcarrier; i < csi_length; ++i) {
+            _get_subcarrier_csi(data->buf, i, &img, &real);
+            csi_avg += (sqrtf(pow(img, 2) + pow(real, 2))) / csi_length;
+        }
+        printf("%.2f\n", csi_avg);
+
+        // Free memory allocated in csi_callback function
+        free(data);
     }
-    printf("%.2f\n", csi_avg);
+
 }
 
 void csi_callback(void* ctx, wifi_csi_info_t* data) {
@@ -144,9 +155,13 @@ void csi_callback(void* ctx, wifi_csi_info_t* data) {
      * Do NOT do lengthy operation in this callback function.
      * Post necessary data to a lower priority task and handle it.
      * */
+    // Copy data into heap memory
+    wifi_csi_info_t* data_cp =(wifi_csi_info_t*)malloc(sizeof(*data));
+    memcpy(data_cp, data, sizeof(*data));
+    // Post data to queue
+    xQueueSendToBack(csi_queue, &data_cp, 0);
 
-    //printf("%s\n", (char*)ctx);
-    serial_print_csi(data);
+    //serial_print_csi(data);
 
     /*
      * About the csi data:
@@ -157,8 +172,6 @@ void csi_callback(void* ctx, wifi_csi_info_t* data) {
      * The default bandwidth for ESP32 station and AP is HT40, so handle CSI data with HT40 format.
      *
      * */
-
-
 }
 
 
@@ -313,16 +326,9 @@ void app_main(void)
 {
     // NVS is designed to store key-value pairs in flash
     ESP_ERROR_CHECK(nvs_flash_init());
-//    ESP_ERROR_CHECK(esp_netif_init());
-//    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    // Init csi
-
-    /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
-     * Read "Establishing Wi-Fi or Ethernet Connection" section in
-     * examples/protocols/README.md for more information about this function.
-     */
-    //ESP_ERROR_CHECK(example_connect());
+    csi_queue = xQueueCreate(5, sizeof(wifi_csi_info_t*));
     wifi_init_sta();
     csi_init();
     xTaskCreate(tcp_client_task, "tcp_client", 4096, NULL, 5, NULL);
+    xTaskCreate(serial_print_csi_task, "serial_print_csi", 4096, NULL, 1, NULL);
 }
