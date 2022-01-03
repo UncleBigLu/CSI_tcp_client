@@ -141,7 +141,13 @@ static void serial_print_csi_task() {
             _get_subcarrier_csi(data->buf, i, &img, &real);
             csi_avg += (sqrtf(pow(img, 2) + pow(real, 2))) / csi_length;
         }
-        printf("%.2f\n", csi_avg);
+        printf("%.2f ", csi_avg);
+        // Get timestamp from data ctrl field
+        // This field is the local time when this packet is received.
+        // It is precise only if modem sleep or light sleep is not enabled.
+        // Unit: microsecond
+        uint32_t timestamp = data->rx_ctrl.timestamp;
+        printf("%u\n", timestamp);
 
         // Free memory allocated in csi_callback function
         free(data);
