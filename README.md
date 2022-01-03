@@ -67,3 +67,6 @@ See the Getting Started Guide for full steps to configure and use ESP-IDF to bui
 ## Troubleshooting
 
 Start server first, to receive data sent from the client (application).
+
+## 2021.12.27开发记录
+尝试将client连接至ESP32AP, 并向运行在AP上的TCP Server发送数据以获得CSI.

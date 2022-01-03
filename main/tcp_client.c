@@ -22,6 +22,7 @@
 #include "lwip/err.h"
 #include "lwip/sockets.h"
 
+#include <math.h>
 
 #if defined(CONFIG_EXAMPLE_IPV4)
 #define HOST_IP_ADDR CONFIG_EXAMPLE_IPV4_ADDR
@@ -68,14 +69,14 @@ static void tcp_client_task(void *pvParameters)
             ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
             break;
         }
-        ESP_LOGI(TAG, "Socket created, connecting to %s:%d", host_ip, PORT);
+        //ESP_LOGI(TAG, "Socket created, connecting to %s:%d", host_ip, PORT);
 
         int err = connect(sock, (struct sockaddr *)&dest_addr, sizeof(struct sockaddr_in6));
         if (err != 0) {
             ESP_LOGE(TAG, "Socket unable to connect: errno %d", errno);
             break;
         }
-        ESP_LOGI(TAG, "Successfully connected");
+        //ESP_LOGI(TAG, "Successfully connected");
 
         while (1) {
             int err = send(sock, payload, strlen(payload), 0);
@@ -87,21 +88,21 @@ static void tcp_client_task(void *pvParameters)
             int len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
             // Error occurred during receiving
             if (len < 0) {
-                ESP_LOGE(TAG, "recv failed: errno %d", errno);
+                //ESP_LOGE(TAG, "recv failed: errno %d", errno);
                 break;
             }
             // Data received
             else {
                 rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string
-                ESP_LOGI(TAG, "Received %d bytes from %s:", len, host_ip);
-                ESP_LOGI(TAG, "%s", rx_buffer);
+                //ESP_LOGI(TAG, "Received %d bytes from %s:", len, host_ip);
+                //ESP_LOGI(TAG, "%s", rx_buffer);
             }
 
-            vTaskDelay(2000 / portTICK_PERIOD_MS);
+            vTaskDelay(1 / portTICK_PERIOD_MS);
         }
 
         if (sock != -1) {
-            ESP_LOGE(TAG, "Shutting down socket and restarting...");
+            //ESP_LOGE(TAG, "Shutting down socket and restarting...");
             shutdown(sock, 0);
             close(sock);
         }
@@ -109,6 +110,11 @@ static void tcp_client_task(void *pvParameters)
     vTaskDelete(NULL);
 }
 
+static void _get_subcarrier_csi(const int8_t* csi_data, uint16_t subcarrier_index, int8_t* imagin, int8_t* real)
+{
+    *imagin = csi_data[2*subcarrier_index];
+    *real = csi_data[2*subcarrier_index + 1];
+}
 
 /*
  * ctx: context arguement, passed to esp_wifi_csi_rx_cb()when registering callback function
@@ -118,22 +124,62 @@ static void tcp_client_task(void *pvParameters)
  * wifi_csi_info_t:
  *
  * */
-void csi_callback(void* ctx, wifi_csi_info_t* data) {
-    //printf("%s\n", (char*)ctx);
-    printf("csi data length: %u\n", data->len);
-    printf("is valid: %d\n", data->first_word_invalid);
+
+static void serial_print_csi(wifi_csi_info_t* data) {
+    // Get average csi of all subcarrier
+    uint16_t csi_length = data->len;
+    uint16_t start_subcarrier = data->first_word_invalid ? 2 : 0;
+    float csi_avg = 0;
+    int8_t img, real;
+    for(uint16_t i = start_subcarrier; i < csi_length; ++i) {
+        _get_subcarrier_csi(data->buf, i, &img, &real);
+        csi_avg += (sqrtf(pow(img, 2) + pow(real, 2))) / csi_length;
+    }
+    printf("%.2f\n", csi_avg);
 }
+
+void csi_callback(void* ctx, wifi_csi_info_t* data) {
+    /*
+     * Best practice:
+     * Do NOT do lengthy operation in this callback function.
+     * Post necessary data to a lower priority task and handle it.
+     * */
+
+    //printf("%s\n", (char*)ctx);
+    serial_print_csi(data);
+
+    /*
+     * About the csi data:
+     *   Each channel frequency response of sub-carrier is recorded by two bytes of signed characters.
+     * The first one is imaginary part and the second one is real part.
+     *
+     * Here we're trying to get data from HTLTF field. LLTF and STBC-HTLTF are disabled.
+     * The default bandwidth for ESP32 station and AP is HT40, so handle CSI data with HT40 format.
+     *
+     * */
+
+
+}
+
+
 
 static void csi_init() {
     ESP_ERROR_CHECK(esp_wifi_set_csi_rx_cb(&csi_callback, NULL));
 
     wifi_csi_config_t csicfg;
-    csicfg.lltf_en = true;
+
+    // Try to get raw csi from only ht-ltf.
+    csicfg.lltf_en = false;
     csicfg.htltf_en = true;
-    csicfg.stbc_htltf2_en = true;
-    csicfg.ltf_merge_en = true;
-    csicfg.channel_filter_en = true;
+    csicfg.stbc_htltf2_en = false;
+    // Enable to generate htlft data by averaging lltf and ht_ltf data when receiving HT packet.
+    // Otherwise, use ht_ltf data directly. Default enabled
+    csicfg.ltf_merge_en = false;
+    //enable to turn on channel filter to smooth adjacent sub-carrier.
+    // Disable it to keep independence of adjacent sub-carrier. Default enabled
+    csicfg.channel_filter_en = false;
     csicfg.manu_scale = false;
+
     ESP_ERROR_CHECK(esp_wifi_set_csi_config(&csicfg));
 
 
@@ -146,7 +192,7 @@ static void csi_init() {
    If you'd rather not, just change the below entries to strings with
    the config you want - ie #define EXAMPLE_WIFI_SSID "mywifissid"
 */
-#define EXAMPLE_ESP_WIFI_SSID      "SCU_Makers"
+#define EXAMPLE_ESP_WIFI_SSID      "tcp_server_ap"
 #define EXAMPLE_ESP_WIFI_PASS      "iloveSCU"
 #define EXAMPLE_ESP_MAXIMUM_RETRY  5
 
