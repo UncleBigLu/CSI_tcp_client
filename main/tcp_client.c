@@ -35,7 +35,8 @@
 #define PORT CONFIG_EXAMPLE_PORT
 
 // Set to true to print CSI frequency to serial
-#define COUNT_CSI_FREQUENCY 1
+#define COUNT_CSI_FREQUENCY 0
+#define PRINT_TIMESTAMP 0
 
 static const char *TAG = "example";
 static const char *payload = "Message from ESP32 ";
@@ -143,9 +144,12 @@ static void print_csi_freq_task() {
 }
 
 static void serial_print_csi_task() {
-    // Get CSI from queue
+    // CSI(n) = p*CSI + (1-p)*CSI(n-1)
+    float last_csi_val = 0;
+    float p = 0.5;
     while(1)
     {
+        // Get CSI from queue
         wifi_csi_info_t* data = NULL;
         xQueueReceive(csi_queue, &data, portMAX_DELAY);
         // Get average csi of all subcarrier
@@ -157,13 +161,19 @@ static void serial_print_csi_task() {
             _get_subcarrier_csi(data->buf, i, &img, &real);
             csi_avg += (sqrtf(pow(img, 2) + pow(real, 2))) / csi_length;
         }
-        printf("%.2f ", csi_avg);
-        // Get timestamp from data ctrl field
-        // This field is the local time when this packet is received.
-        // It is precise only if modem sleep or light sleep is not enabled.
-        // Unit: microsecond
-        uint32_t timestamp = data->rx_ctrl.timestamp;
-        printf("%u\n", timestamp);
+        float csi_filtered = p * csi_avg + (1-p) * last_csi_val;
+        last_csi_val = csi_filtered;
+        printf("%.2f ", csi_filtered);
+        if(PRINT_TIMESTAMP)
+        {
+            // Get timestamp from data ctrl field
+            // This field is the local time when this packet is received.
+            // It is precise only if modem sleep or light sleep is not enabled.
+            // Unit: microsecond
+            uint32_t timestamp = data->rx_ctrl.timestamp;
+            printf("%u ", timestamp);
+        }
+        printf("\n");
 
         // Free memory allocated in csi_callback function
         free(data);
