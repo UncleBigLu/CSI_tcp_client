@@ -34,8 +34,15 @@
 
 #define PORT CONFIG_EXAMPLE_PORT
 
+// Set to true to print CSI frequency to serial
+#define COUNT_CSI_FREQUENCY 1
+
 static const char *TAG = "example";
 static const char *payload = "Message from ESP32 ";
+
+// Count CSI data frequency
+static uint32_t last_CSI_fre_time = 0;
+static uint16_t csi_count = 0;
 
 static void tcp_client_task(void *pvParameters)
 {
@@ -126,6 +133,15 @@ static void _get_subcarrier_csi(const int8_t* csi_data, uint16_t subcarrier_inde
  * */
 static QueueHandle_t csi_queue;
 
+static void print_csi_freq_task() {
+    while (1)
+    {
+        printf("csi_count: %u\n", csi_count);
+        csi_count = 0;
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+    }
+}
+
 static void serial_print_csi_task() {
     // Get CSI from queue
     while(1)
@@ -161,6 +177,11 @@ void csi_callback(void* ctx, wifi_csi_info_t* data) {
      * Do NOT do lengthy operation in this callback function.
      * Post necessary data to a lower priority task and handle it.
      * */
+    // Count csi frequency
+    if(COUNT_CSI_FREQUENCY)
+    {
+        csi_count++;
+    }
     // Copy data into heap memory
     wifi_csi_info_t* data_cp =(wifi_csi_info_t*)malloc(sizeof(*data));
     memcpy(data_cp, data, sizeof(*data));
@@ -337,4 +358,6 @@ void app_main(void)
     csi_init();
     xTaskCreate(tcp_client_task, "tcp_client", 4096, NULL, 5, NULL);
     xTaskCreate(serial_print_csi_task, "serial_print_csi", 4096, NULL, 1, NULL);
+    if(COUNT_CSI_FREQUENCY)
+        xTaskCreate(print_csi_freq_task, "print_csi_freq", 2048, NULL, 2, NULL);
 }
